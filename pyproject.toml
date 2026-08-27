@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "political-trade-tracker"
+version = "0.1.0"
+description = "Research pipeline: track disclosed politician trades + policy news, backtest signals, paper-trade the result."
+requires-python = ">=3.10"
+
+[tool.setuptools]
+packages = ["tracker", "tracker.data", "tracker.signals", "tracker.backtest", "tracker.models", "tracker.execution"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
