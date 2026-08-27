@@ -39,7 +39,11 @@ class Settings:
 
     newsapi_key: str | None = os.getenv("NEWSAPI_KEY") or None
 
-    initial_capital_usd: float = float(os.getenv("INITIAL_CAPITAL_USD", "500"))
+    # Base currency for sizing is GBP (what you'd actually be funding the
+    # account with); tracker/data/fx.py converts to USD at run time since
+    # the underlying instruments (US-listed equities/ETFs) trade in USD.
+    initial_capital_gbp: float = float(os.getenv("INITIAL_CAPITAL_GBP", "500"))
+    fx_fallback_gbpusd: float = float(os.getenv("FX_FALLBACK_GBPUSD", "1.27"))
     max_position_pct: float = float(os.getenv("MAX_POSITION_PCT", "0.10"))
     transaction_cost_bps: float = float(os.getenv("TRANSACTION_COST_BPS", "5"))
 
@@ -48,6 +52,18 @@ class Settings:
     alpaca_base_url: str = os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
 
     lookback_years: int = int(os.getenv("LOOKBACK_YEARS", "2"))
+
+    # Wealthy/notable individuals to track via SEC Form 4 insider filings
+    # (see tracker/data/insider_trades.py) — distinct from WATCHLIST, which
+    # is matched against Congressional STOCK Act disclosures.
+    watched_insiders: list[str] = field(
+        default_factory=lambda: _list_env("WATCHED_INSIDERS") or ["Elon Musk", "Jeff Bezos"]
+    )
+    sec_edgar_contact: str = os.getenv("SEC_EDGAR_CONTACT", "research-contact@example.com")
+
+    # Local daily run time, informational only — actual scheduling is done
+    # by whatever cron/trigger invokes `python -m tracker.cli daily-run`.
+    daily_run_time_uk: str = os.getenv("DAILY_RUN_TIME_UK", "07:00")
 
 
 settings = Settings()

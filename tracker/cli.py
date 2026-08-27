@@ -23,6 +23,8 @@ from tracker.backtest.engine import buy_and_hold_benchmark, resolve_trades, simu
 from tracker.backtest.metrics import build_report
 from tracker.config import REPORTS_DIR, settings
 from tracker.data import disclosures as disclosures_data
+from tracker.data import fx
+from tracker.data import insider_trades as insider_data
 from tracker.data import news as news_data
 from tracker.data import prices as prices_data
 from tracker.data.event_map import all_tickers as event_tickers
@@ -44,19 +46,31 @@ def cli():
 def fetch_data(force_refresh: bool):
     """Warm the local cache: disclosures, prices, news."""
     df = disclosures_data.fetch_disclosures(force_refresh=force_refresh)
-    click.echo(f"Disclosures: {len(df)} rows, {df['ticker'].nunique()} tickers")
+    click.echo(f"Congress disclosures: {len(df)} rows, {df['ticker'].nunique()} tickers")
 
-    tickers = sorted(set(df["ticker"].dropna()) | set(event_tickers()) | {prices_data.BENCHMARK_TICKER})
+    insiders = insider_data.fetch_insider_trades()
+    click.echo(f"Insider (Form 4) trades: {len(insiders)} rows for {', '.join(settings.watched_insiders)}")
+
+    tickers = sorted(
+        set(df["ticker"].dropna()) | set(insiders["ticker"].dropna()) | set(event_tickers()) | {prices_data.BENCHMARK_TICKER}
+    )
     prices = prices_data.fetch_prices(tickers, use_cache=not force_refresh)
     click.echo(f"Prices: fetched {len(prices)}/{len(tickers)} tickers")
 
     news = news_data.fetch_policy_news(use_cache=not force_refresh)
     click.echo(f"News: {len(news)} articles across {news['keyword'].nunique() if not news.empty else 0} keywords")
 
+    capital_usd, fx_rate = fx.resolve_capital_usd()
+    click.echo(f"FX: £{settings.initial_capital_gbp:,.2f} -> ${capital_usd:,.2f} @ {fx_rate:.4f} GBPUSD")
+
 
 def _mirror_pipeline(holding_days: int, min_lag_days: int | None):
-    df = disclosures_data.fetch_disclosures()
-    df = disclosures_data.filter_watchlist(df, settings.watchlist)
+    congress_df = disclosures_data.fetch_disclosures()
+    congress_df = disclosures_data.filter_watchlist(congress_df, settings.watchlist)
+
+    insider_df = insider_data.fetch_insider_trades()
+
+    df = pd.concat([congress_df, insider_df], ignore_index=True) if not insider_df.empty else congress_df
     signals = mirror_trade.generate_signals(df)
     if min_lag_days is not None:
         signals = signals[signals["disclosure_lag_days"] >= min_lag_days]
@@ -77,10 +91,12 @@ def backtest_mirror(holding_days: int, min_lag_days: int | None):
         click.echo("No resolvable trades — check WATCHLIST and data availability.")
         return
 
+    capital_usd, fx_rate = fx.resolve_capital_usd()
     calendar = prices[prices_data.BENCHMARK_TICKER].index
-    sim = simulate_portfolio(trades, calendar, initial_capital=settings.initial_capital_usd, max_position_pct=settings.max_position_pct)
-    benchmark_curve = buy_and_hold_benchmark(prices[prices_data.BENCHMARK_TICKER], calendar, settings.initial_capital_usd)
+    sim = simulate_portfolio(trades, calendar, initial_capital=capital_usd, max_position_pct=settings.max_position_pct)
+    benchmark_curve = buy_and_hold_benchmark(prices[prices_data.BENCHMARK_TICKER], calendar, capital_usd)
     report = build_report(sim.equity_curve, trades, benchmark_curve)
+    click.echo(f"Starting capital: £{settings.initial_capital_gbp:,.2f} -> ${capital_usd:,.2f} @ {fx_rate:.4f} GBPUSD")
 
     breakdown = mirror_trade.member_win_rates(trades)
     content = render_report("Mirror-Trade Strategy Backtest", report, trades, breakdown, "member")
@@ -111,10 +127,12 @@ def backtest_events(holding_days: int, min_article_count: int):
         click.echo("No resolvable trades — check event_map.py keywords and news availability.")
         return
 
+    capital_usd, fx_rate = fx.resolve_capital_usd()
     calendar = prices[prices_data.BENCHMARK_TICKER].index
-    sim = simulate_portfolio(trades, calendar, initial_capital=settings.initial_capital_usd, max_position_pct=settings.max_position_pct)
-    benchmark_curve = buy_and_hold_benchmark(prices[prices_data.BENCHMARK_TICKER], calendar, settings.initial_capital_usd)
+    sim = simulate_portfolio(trades, calendar, initial_capital=capital_usd, max_position_pct=settings.max_position_pct)
+    benchmark_curve = buy_and_hold_benchmark(prices[prices_data.BENCHMARK_TICKER], calendar, capital_usd)
     report = build_report(sim.equity_curve, trades, benchmark_curve)
+    click.echo(f"Starting capital: £{settings.initial_capital_gbp:,.2f} -> ${capital_usd:,.2f} @ {fx_rate:.4f} GBPUSD")
 
     breakdown = event_driven.category_hit_rates(trades)
     content = render_report("Event-Driven Strategy Backtest", report, trades, breakdown, "category")
@@ -153,6 +171,72 @@ def train_events(model_type: str, holding_days: int, min_article_count: int):
     click.echo(report.to_dict())
 
 
+@cli.command("backtest-walkforward")
+@click.option("--strategy", type=click.Choice(["mirror", "events"]), required=True)
+@click.option("--train-months", default=6, show_default=True)
+@click.option("--test-months", default=1, show_default=True)
+@click.option("--model-type", default="gbm", type=click.Choice(["gbm", "logreg"]))
+@click.option("--prob-threshold", default=0.5, show_default=True)
+@click.option("--holding-days", default=None, type=int)
+def backtest_walkforward(
+    strategy: str, train_months: int, test_months: int, model_type: str, prob_threshold: float, holding_days: int | None
+):
+    """Honest out-of-sample test: roll the model forward one test block at
+    a time, training only on data that predates it, and only take trades
+    it scores >= --prob-threshold. Reports the model-filtered curve next to
+    a take-every-signal curve and buy-and-hold, so you can see whether the
+    model is adding anything over just mirroring everything. This is
+    deliberately not a parameter search against the full history — see
+    tracker/backtest/walkforward.py for why."""
+    from tracker.backtest.walkforward import walk_forward_backtest
+
+    if strategy == "mirror":
+        hd = holding_days or 21
+        trades, prices = _mirror_pipeline(hd, None)
+        build_features_fn = feature_lib.build_mirror_features
+        label = "Mirror-Trade"
+    else:
+        hd = holding_days or 10
+        trades, prices = _event_pipeline(hd, 3)
+        build_features_fn = feature_lib.build_event_features
+        label = "Event-Driven"
+
+    if trades.empty:
+        click.echo("No resolvable trades to walk-forward over.")
+        return
+
+    result = walk_forward_backtest(
+        trades,
+        build_features_fn,
+        train_months=train_months,
+        test_months=test_months,
+        model_type=model_type,
+        prob_threshold=prob_threshold,
+    )
+    click.echo(result.fold_summary().to_string(index=False))
+
+    if result.all_candidate_trades.empty:
+        click.echo("No out-of-sample test folds had enough training data — need a longer history or a lower --train-months.")
+        return
+
+    capital_usd, fx_rate = fx.resolve_capital_usd()
+    click.echo(f"\nStarting capital: £{settings.initial_capital_gbp:,.2f} -> ${capital_usd:,.2f} @ {fx_rate:.4f} GBPUSD")
+
+    calendar = prices[prices_data.BENCHMARK_TICKER].index
+    oos_start = result.all_candidate_trades["signal_date"].min()
+    calendar = calendar[calendar >= oos_start]
+    benchmark_curve = buy_and_hold_benchmark(prices[prices_data.BENCHMARK_TICKER], calendar, capital_usd)
+
+    for title, trade_set in (
+        ("Model-filtered (out-of-sample)", result.taken_trades),
+        ("Take every signal (out-of-sample)", result.all_candidate_trades),
+    ):
+        sim = simulate_portfolio(trade_set, calendar, initial_capital=capital_usd, max_position_pct=settings.max_position_pct)
+        report = build_report(sim.equity_curve, trade_set, benchmark_curve)
+        click.echo(f"\n=== {label}: {title} ===")
+        click.echo(report.to_dict())
+
+
 @cli.command("paper-trade")
 @click.option("--strategy", type=click.Choice(["mirror", "events"]), required=True)
 @click.option("--holding-days", default=21, show_default=True)
@@ -163,8 +247,10 @@ def paper_trade(strategy: str, holding_days: int, confirm: bool):
     from tracker.execution.paper_broker import client_from_settings, execute_orders, signals_to_orders
 
     if strategy == "mirror":
-        df = disclosures_data.fetch_disclosures()
-        df = disclosures_data.filter_watchlist(df, settings.watchlist)
+        congress_df = disclosures_data.fetch_disclosures()
+        congress_df = disclosures_data.filter_watchlist(congress_df, settings.watchlist)
+        insider_df = insider_data.fetch_insider_trades()
+        df = pd.concat([congress_df, insider_df], ignore_index=True) if not insider_df.empty else congress_df
         signals = mirror_trade.generate_signals(df)
     else:
         news = news_data.fetch_policy_news()
@@ -185,6 +271,25 @@ def paper_trade(strategy: str, holding_days: int, confirm: bool):
 
     results = execute_orders(client, orders, dry_run=not confirm)
     for r in results:
+        click.echo(r)
+
+
+@cli.command("daily-run")
+@click.option("--window-hours", default=24, show_default=True, help="How far back to look for news/disclosures.")
+@click.option("--min-article-count", default=3, show_default=True)
+@click.option("--confirm", is_flag=True, help="Actually submit to the paper API instead of a dry run.")
+def daily_run_cmd(window_hours: int, min_article_count: int, confirm: bool):
+    """Run once: react to the last `window_hours` of news + newly disclosed
+    trades, size against GBP capital, submit to the paper broker (dry run
+    unless --confirm). Intended to be invoked by an external daily
+    scheduler — see README "Daily automation"."""
+    from tracker.pipeline.daily import run_daily
+
+    result = run_daily(window_hours=window_hours, min_article_count=min_article_count, dry_run=not confirm)
+    click.echo(result.summary())
+    if not result.orders.empty:
+        click.echo(result.orders.to_string(index=False))
+    for r in result.order_results:
         click.echo(r)
 
 
