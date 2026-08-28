@@ -22,14 +22,15 @@ _CACHE_FILE = CACHE_DIR / "fx_gbpusd.txt"
 def fetch_gbpusd_rate(use_cache: bool = True) -> float:
     """Latest GBP/USD rate (1 GBP = N USD). Falls back to the last cached
     value, then to settings.fx_fallback_gbpusd, on any failure."""
-    try:
-        import yfinance as yf
+    from datetime import datetime, timedelta
 
-        data = yf.download(GBPUSD_TICKER, period="5d", progress=False, auto_adjust=False)
+    from tracker.data.prices import _fetch_chart
+
+    try:
+        data = _fetch_chart(GBPUSD_TICKER, datetime.utcnow() - timedelta(days=5), datetime.utcnow())
         if data.empty:
             raise ValueError("empty GBPUSD history")
-        close_col = "Close" if "Close" in data.columns else data.columns[0]
-        rate = float(data[close_col].dropna().iloc[-1])
+        rate = float(data["close"].dropna().iloc[-1])
         _CACHE_FILE.write_text(str(rate))
         return rate
     except Exception as exc:  # network/parsing errors of many possible types

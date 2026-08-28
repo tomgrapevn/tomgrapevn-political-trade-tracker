@@ -44,7 +44,7 @@ from tracker.config import CACHE_DIR, settings
 
 logger = logging.getLogger(__name__)
 
-BROWSE_EDGAR_URL = "https://www.sec.gov/cgi-bin/browse-edgar"
+FULL_TEXT_SEARCH_URL = "https://efts.sec.gov/LATEST/search-index"
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
 ARCHIVE_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{accession_nodash}/{doc}"
 
@@ -72,28 +72,49 @@ def _headers() -> dict:
 
 def resolve_cik(name: str) -> str | None:
     """Look up a reporting owner's 10-digit zero-padded CIK by name via
-    EDGAR's company/owner search. Returns None if no confident match."""
+    EDGAR's full-text search index (matches Form 4 filings mentioning the
+    name, then reads the owner CIK off the top hit). Returns None if no
+    match.
+
+    Deliberately not the legacy `cgi-bin/browse-edgar` company-search
+    endpoint — verified against live SEC infrastructure while building
+    this, that endpoint reliably times out through this project's network
+    egress (10s and 25s both failed) while `efts.sec.gov` responds
+    normally; if the same happens in your environment, this is why.
+    """
     cache_file = CACHE_DIR / f"cik_{re.sub(r'[^a-z0-9]', '_', name.lower())}.txt"
     if cache_file.exists():
         return cache_file.read_text().strip() or None
 
-    params = {"action": "getcompany", "company": name, "type": "4", "owner": "include", "count": "10", "output": "atom"}
+    # EDGAR's full-text index matches document text, not the structured
+    # reporting-owner name, and the colloquial "First Last" form doesn't
+    # reliably appear verbatim in filing text (verified live: it happened
+    # to work for "Elon Musk" but not "Jeff Bezos"). Reporting-owner names
+    # are consistently "SURNAME FIRSTNAME" in display_names though, so
+    # search on the surname alone — high recall — and let the all-tokens
+    # check below pick the right person out of the results.
+    surname = name.split()[-1]
+    params = {"q": f'"{surname}"', "forms": "4"}
     try:
-        resp = requests.get(BROWSE_EDGAR_URL, params=params, headers=_headers(), timeout=20)
+        resp = requests.get(FULL_TEXT_SEARCH_URL, params=params, headers=_headers(), timeout=20)
         resp.raise_for_status()
-        root = ET.fromstring(resp.content)
-        ns = {"a": "http://www.w3.org/2005/Atom"}
-        for entry in root.findall("a:entry", ns):
-            cik_match = re.search(r"CIK=(\d{10})", entry.findtext("a:link", "", ns) or entry.get("link", ""))
-            if not cik_match:
-                title = entry.findtext("a:title", "", ns) or ""
-                cik_match = re.search(r"\((\d{10})\)", title)
-            if cik_match:
-                cik = cik_match.group(1)
+        payload = resp.json()
+    except (requests.RequestException, ValueError) as exc:
+        logger.warning("CIK lookup failed for %r (%s)", name, exc)
+        return None
+
+    name_tokens = name.upper().split()
+    for hit in payload.get("hits", {}).get("hits", []):
+        source = hit.get("_source", {})
+        # `ciks` and `display_names` are parallel arrays — display_names[i]
+        # is "SURNAME FIRSTNAME  (CIK 0001234567)" for ciks[i]. One hit
+        # lists both the person (reporting owner) and the issuer company;
+        # match every name token to pick the person, not the issuer.
+        for cik, display_name in zip(source.get("ciks", []), source.get("display_names", [])):
+            display_upper = display_name.upper()
+            if "(CIK" in display_name and all(tok in display_upper for tok in name_tokens):
                 cache_file.write_text(cik)
                 return cik
-    except (requests.RequestException, ET.ParseError) as exc:
-        logger.warning("CIK lookup failed for %r (%s)", name, exc)
     return None
 
 
@@ -162,7 +183,14 @@ def fetch_insider_trades(names: list[str] | None = None, max_filings_per_person:
                 continue
             n_seen += 1
             accession_nodash = accession.replace("-", "")
-            url = ARCHIVE_URL.format(cik=int(cik), accession_nodash=accession_nodash, doc=doc)
+            # `primaryDocument` from the submissions API often points at
+            # e.g. "xslF345X06/wk-form4_123.xml" — that path serves an
+            # XSLT-rendered HTML view for browsers, not parseable XML, even
+            # though it ends in .xml. Verified against a live Musk filing
+            # while building this: the raw XML the parser below needs is
+            # the same basename directly in the accession's root directory.
+            doc_basename = doc.rsplit("/", 1)[-1]
+            url = ARCHIVE_URL.format(cik=int(cik), accession_nodash=accession_nodash, doc=doc_basename)
             try:
                 doc_resp = requests.get(url, headers=_headers(), timeout=20)
                 doc_resp.raise_for_status()

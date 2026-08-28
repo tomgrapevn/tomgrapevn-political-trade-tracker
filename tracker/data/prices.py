@@ -1,29 +1,93 @@
-"""Historical price data via yfinance (no API key required).
+"""Historical price data via Yahoo Finance's chart API (no API key needed).
 
-Caches per-ticker OHLCV to CACHE_DIR so repeated backtest runs don't re-hit
-the network, and so this module still works (against stale data) somewhere
-without open internet access.
+Calls `query1.finance.yahoo.com/v8/finance/chart/<ticker>` directly with
+`requests` rather than going through the `yfinance` package. Verified live
+while building this: `yfinance`'s default session tries to fetch a
+cookie/crumb from a *different* host (`fc.yahoo.com`) before every request,
+and that specific handshake failed with SSL resets on this project's
+network even though the chart endpoint itself worked fine — historical
+daily bars don't need a crumb, so this skips that broken dependency
+entirely. Yahoo's endpoints are also rate-limited per source IP (expect
+occasional 429s, worse on a shared egress) — hence the retry/backoff below
+and the inter-ticker delay in `fetch_prices`.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pandas as pd
+import requests
 
 from tracker.config import CACHE_DIR, settings
 
 logger = logging.getLogger(__name__)
 
 BENCHMARK_TICKER = "SPY"
+CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+_REQUEST_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; political-trade-tracker research tool)"}
 
 
-def _cache_path(ticker: str) -> "Path":  # noqa: F821 - typing only
-    from pathlib import Path
-
+def _cache_path(ticker: str) -> Path:
     safe = ticker.replace("/", "_")
     return CACHE_DIR / f"prices_{safe}.parquet"
+
+
+def _fetch_chart(
+    ticker: str, start: datetime, end: datetime, interval: str = "1d", max_retries: int = 4
+) -> pd.DataFrame:
+    params = {"period1": int(start.timestamp()), "period2": int(end.timestamp()), "interval": interval}
+    backoff = 2.0
+    last_exc: Exception | None = None
+
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(
+                CHART_URL.format(ticker=ticker), params=params, headers=_REQUEST_HEADERS, timeout=20
+            )
+            if resp.status_code == 429:
+                logger.info("Rate limited fetching %s (attempt %d/%d), backing off %.0fs", ticker, attempt + 1, max_retries, backoff)
+                time.sleep(backoff)
+                backoff *= 2
+                continue
+            resp.raise_for_status()
+            payload = resp.json()
+            results = payload.get("chart", {}).get("result")
+            if not results:
+                logger.warning("No price data returned for %s", ticker)
+                return pd.DataFrame()
+
+            result = results[0]
+            timestamps = result.get("timestamp", [])
+            if not timestamps:
+                return pd.DataFrame()
+            quote = result["indicators"]["quote"][0]
+            adjclose_block = result["indicators"].get("adjclose", [{}])[0]
+            adjclose = adjclose_block.get("adjclose", quote.get("close"))
+
+            df = pd.DataFrame(
+                {
+                    "open": quote.get("open"),
+                    "high": quote.get("high"),
+                    "low": quote.get("low"),
+                    "close": quote.get("close"),
+                    "adj_close": adjclose,
+                    "volume": quote.get("volume"),
+                },
+                index=pd.to_datetime(timestamps, unit="s", utc=True).tz_localize(None).normalize(),
+            )
+            df.index.name = "date"
+            return df.dropna(how="all")
+        except (requests.RequestException, ValueError, KeyError, IndexError) as exc:
+            last_exc = exc
+            time.sleep(backoff)
+            backoff *= 2
+
+    logger.warning("Chart fetch failed for %s after %d attempts: %s", ticker, max_retries, last_exc)
+    return pd.DataFrame()
 
 
 def fetch_prices(
@@ -31,49 +95,39 @@ def fetch_prices(
     start: str | datetime | None = None,
     end: str | datetime | None = None,
     use_cache: bool = True,
+    request_delay_seconds: float = 1.0,
 ) -> dict[str, pd.DataFrame]:
     """Fetch daily OHLCV for each ticker. Returns {ticker: DataFrame} with a
     DatetimeIndex and columns [open, high, low, close, adj_close, volume].
     """
-    import yfinance as yf
-
     if start is None:
         start = datetime.utcnow() - timedelta(days=365 * settings.lookback_years)
+    else:
+        start = pd.Timestamp(start).to_pydatetime()
     if end is None:
         end = datetime.utcnow()
+    else:
+        end = pd.Timestamp(end).to_pydatetime()
 
     out: dict[str, pd.DataFrame] = {}
-    for ticker in tickers:
+    for i, ticker in enumerate(tickers):
         cache_file = _cache_path(ticker)
         if use_cache and cache_file.exists():
             df = pd.read_parquet(cache_file)
             if not df.empty and df.index.min() <= pd.Timestamp(start) + pd.Timedelta(days=5):
                 out[ticker] = df
                 continue
-        try:
-            raw = yf.download(ticker, start=start, end=end, auto_adjust=False, progress=False)
-            if raw.empty:
-                logger.warning("No price data returned for %s", ticker)
-                continue
-            if isinstance(raw.columns, pd.MultiIndex):
-                raw.columns = [c[0] for c in raw.columns]
-            raw = raw.rename(
-                columns={
-                    "Open": "open",
-                    "High": "high",
-                    "Low": "low",
-                    "Close": "close",
-                    "Adj Close": "adj_close",
-                    "Volume": "volume",
-                }
-            )
-            raw.index.name = "date"
-            raw.to_parquet(cache_file)
-            out[ticker] = raw
-        except Exception as exc:  # yfinance can raise a range of network/parse errors
-            logger.warning("Failed to fetch prices for %s: %s", ticker, exc)
+
+        if i > 0:
+            time.sleep(request_delay_seconds)  # spread requests out to avoid tripping Yahoo's rate limit
+
+        raw = _fetch_chart(ticker, start, end)
+        if raw.empty:
             if cache_file.exists():
                 out[ticker] = pd.read_parquet(cache_file)
+            continue
+        raw.to_parquet(cache_file)
+        out[ticker] = raw
 
     return out
 

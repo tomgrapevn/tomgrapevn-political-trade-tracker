@@ -121,14 +121,26 @@ cp .env.example .env
 # INITIAL_CAPITAL_GBP, and optionally Alpaca paper keys.
 ```
 
-### Note on this repository's own dev environment
+### Live-data status (checked directly against each source)
 
-This repo was built and tested in a sandboxed session whose outbound network
-was restricted to PyPI and GitHub only — Senate/House Stock Watcher,
-yfinance, GDELT, and SEC EDGAR (`www.sec.gov` / `data.sec.gov`) were all
-unreachable from there (confirmed directly, including via a raw-fetch tool
-that normally has broader reach than a sandboxed shell — this wasn't a
-`curl`-specific block). So:
+Once this project's environment network access was opened up, every data
+source got tested against the real thing, not just synthetic fixtures.
+Current status:
+
+| Source | Status | Notes |
+|---|---|---|
+| SEC Form 4 (insider tracker) | **Working** | Fixed two real bugs found this way: Bezos's CIK has to be found via full-text search on surname (the legacy `cgi-bin/browse-edgar` name-search endpoint times out); and `primaryDocument` often points at an XSLT-rendered HTML view, not raw XML — fixed by using the same filename at the accession root instead. |
+| Prices (`tracker/data/prices.py`) | **Working**, rewritten | `yfinance`'s cookie/crumb fetch to `fc.yahoo.com` failed outright here; the underlying chart API works fine called directly, so that's what this now does, with retry/backoff for Yahoo's real (and fairly aggressive) per-IP rate limiting. |
+| GBP→USD FX | **Working** | Uses the same direct chart fetch (`GBPUSD=X`). |
+| Congress disclosures (Senate/House Stock Watcher) | **Down** | Both S3 buckets (`senate-stock-watcher-data`, `house-stock-watcher-data`) return AccessDenied, and the community's own GitHub source (`timothycarambat/senate-stock-watcher-data`) stopped updating in **December 2020**. This looks like the project has gone dark, not a transient outage. `fetch_disclosures()` now degrades to an empty frame instead of crashing, so the insider tracker still works on its own — but there is currently no free, live source of Congressional STOCK Act data wired into this repo. If you need it, look at a paid API (Quiver Quant, Capitol Trades) or a direct scraper of `efdsearch.senate.gov` / `disclosures-clerk.house.gov`. |
+| Policy news (GDELT) | **Down** | `api.gdeltproject.org` is serving a TLS certificate that `curl -v` and `openssl` both confirm is invalid ("certificate has expired") even though `openssl s_client` shows a leaf cert dated *today* — most likely a broken intermediate on their end. This is a server-side problem, not fixable from a client without disabling certificate verification, which this project won't do. The event-driven strategy is untestable against live news until GDELT fixes this (or you swap in `NEWSAPI_KEY` and a different provider in `tracker/data/news.py`). |
+
+Given that, **the mirror-trade strategy currently only has insider (Musk/Bezos)
+signals to work with, not Congress** — see "A real result" below for what
+that actually produced.
+
+This repo was originally built in a sandboxed session whose outbound network
+was restricted to PyPI and GitHub only, so:
 
 - `tests/` runs entirely against **synthetic, seeded fixture data**
   (`tests/conftest.py`) — it validates the pipeline's *logic* (no
@@ -147,9 +159,33 @@ that normally has broader reach than a sandboxed shell — this wasn't a
   filing before trusting it (see the module docstring for a sample URL
   pattern).
 - To get a real answer to "would this have made money over the last 12
-  months?", run (with normal internet access):
+  months?", run:
   `python -m tracker.cli backtest-walkforward --strategy mirror --train-months 6 --test-months 1`
   and read the printed report as-is — good, bad, or mixed.
+
+### A real result (run live, not synthetic)
+
+With Congress data down (see table above), `backtest-mirror --holding-days 21`
+against real 2-year price history and real SEC filings found exactly **two**
+qualifying trades: Elon Musk's September 2025 open-market TSLA purchase
+(~$1B, filed as ~25 separate line items in one Form 4 — collapsed to one
+signal, see the dedup note in `tracker/signals/mirror_trade.py`) and one
+Jeff Bezos AMZN purchase. Result: **+1.5% total return vs. +41% for just
+buying and holding SPY over the same window.** Not a cherry-picked bad
+example — it's what the only two real signals available actually did.
+
+The reason isn't that the strategy is badly built; it's structural:
+corporate insiders overwhelmingly *sell* (tax obligations, diversification,
+10b5-1 plans), so open-market *purchases* — the only signal worth mirroring,
+per "What this is (and isn't)" above — are rare. Two data points isn't
+enough to draw a real conclusion either way, and `backtest-walkforward`
+correctly refuses to train a model on that little data rather than
+fabricating a confident-looking curve. The honest takeaway right now: this
+specific signal (insider purchases only, Musk + Bezos only) has not shown
+an edge over the S&P 500 in the one real test available. Widening
+`WATCHED_INSIDERS`, fixing the Congress data source, or getting GDELT news
+working would all add more signal to actually evaluate — right now there
+just isn't much to work with.
 
 ## Usage
 

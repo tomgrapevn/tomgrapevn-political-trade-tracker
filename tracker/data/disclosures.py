@@ -48,7 +48,8 @@ def _normalize_senate(raw: list[dict]) -> pd.DataFrame:
         }
     )
     df["chamber"] = "senate"
-    df["disclosure_date"] = pd.to_datetime(df.get("disclosure_date") or df.get("file_date"), errors="coerce")
+    date_col = "disclosure_date" if "disclosure_date" in df.columns else "file_date"
+    df["disclosure_date"] = pd.to_datetime(df.get(date_col), errors="coerce")
     return df
 
 
@@ -66,7 +67,8 @@ def _normalize_house(raw: list[dict]) -> pd.DataFrame:
         }
     )
     df["chamber"] = "house"
-    df["disclosure_date"] = pd.to_datetime(df.get("disclosure_date_raw") or df.get("disclosure_date"), errors="coerce")
+    date_col = "disclosure_date_raw" if "disclosure_date_raw" in df.columns else "disclosure_date"
+    df["disclosure_date"] = pd.to_datetime(df.get(date_col), errors="coerce")
     return df
 
 
@@ -92,9 +94,17 @@ def _fetch_json(url: str) -> list[dict]:
 def fetch_disclosures(use_cache: bool = True, force_refresh: bool = False) -> pd.DataFrame:
     """Fetch and merge Senate + House disclosed-trade data.
 
-    Falls back to the last cached parquet file if the network calls fail
-    (e.g. running somewhere without open internet access) so downstream
-    pipeline steps can still be exercised against real, if stale, data.
+    Falls back to the last cached parquet file if a source's network call
+    fails, and degrades to whatever source(s) *did* succeed (rather than
+    raising) if only one is reachable. Verified live while building this:
+    as of writing, both `senate-stock-watcher-data` and
+    `house-stock-watcher-data`'s S3 buckets return AccessDenied and their
+    websites are unreachable — that community project appears to have gone
+    dark. If both fail and there's no cache, this returns an **empty**
+    frame (with the expected columns) rather than raising, so a caller
+    relying only on the insider tracker (tracker/data/insider_trades.py)
+    isn't blocked by Congress data being unavailable — check `len(df)`
+    rather than assuming this always has rows.
     """
     if use_cache and not force_refresh and _CACHE_FILE.exists():
         logger.info("Loading disclosures from cache: %s", _CACHE_FILE)
@@ -110,11 +120,14 @@ def fetch_disclosures(use_cache: bool = True, force_refresh: bool = False) -> pd
             frames.append(normalize(raw))
             logger.info("Fetched %d %s disclosures", len(raw), name)
         except (requests.RequestException, json.JSONDecodeError, ValueError) as exc:
-            logger.warning("Failed to fetch %s disclosures (%s)", name, exc)
-            if _CACHE_FILE.exists():
-                logger.warning("Falling back to cached disclosures.")
-                return pd.read_parquet(_CACHE_FILE)
-            raise
+            logger.warning("Failed to fetch %s disclosures (%s) — continuing without this source.", name, exc)
+
+    if not frames:
+        if _CACHE_FILE.exists():
+            logger.warning("Both disclosure sources unreachable — falling back to cache.")
+            return pd.read_parquet(_CACHE_FILE)
+        logger.warning("Both disclosure sources unreachable and no cache exists — returning an empty frame.")
+        return pd.DataFrame(columns=_EXPECTED_COLUMNS + ["disclosure_lag_days"])
 
     df = pd.concat(frames, ignore_index=True)
     for col in _EXPECTED_COLUMNS:

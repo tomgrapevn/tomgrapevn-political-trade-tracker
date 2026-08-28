@@ -55,9 +55,16 @@ def generate_signals(disclosures: pd.DataFrame, include_shorts: bool = False) ->
     out = pd.concat(rows, ignore_index=True)
     out = out.rename(columns={"disclosure_date": "signal_date"})
     out["source_type"] = "disclosure"
-    return out[
-        ["signal_date", "ticker", "side", "member", "chamber", "source_type", "disclosure_lag_days"]
-    ].sort_values("signal_date").reset_index(drop=True)
+    out = out[["signal_date", "ticker", "side", "member", "chamber", "source_type", "disclosure_lag_days"]]
+
+    # One real trading decision can generate many line items in a single
+    # filing — verified live: Elon Musk's ~$1B September 2025 TSLA buy was
+    # filed as ~25 separate open-market purchase transactions (different
+    # blocks/prices, same day, same Form 4). Without this, each line item
+    # would count as its own "trade" in the backtest, wildly inflating the
+    # apparent trade count and win rate for what was one decision.
+    out = out.drop_duplicates(subset=["member", "ticker", "side", "signal_date"])
+    return out.sort_values("signal_date").reset_index(drop=True)
 
 
 def member_win_rates(signals_with_outcomes: pd.DataFrame) -> pd.DataFrame:
