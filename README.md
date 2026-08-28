@@ -206,40 +206,52 @@ just isn't much to work with.
 
 ### A second real result: reacting to Trump's policy announcements
 
-`backtest-trump-events --holding-days 10` against the 18-event calendar
-above and real price history: **+0.6% total return vs. +41% for SPY
-buy-and-hold** over the same window (Feb 2025 - Aug 2026) — again,
-substantially underperforming the market. But the category breakdown is
-more interesting than the headline number:
+`backtest-trump-events --holding-days 10` against real price history:
+**+1.9% total return vs. +41% for SPY buy-and-hold** over the same window
+(Feb 2025 - Aug 2026) — again, substantially underperforming the market.
+But the category breakdown is more interesting than the headline number:
 
-| category | win rate | avg return/trade |
-|---|---|---|
-| middle_east_conflict (Iran-related: oil/defense long, airlines short) | 58% | **+2.0%** |
-| tariff_policy_reversal | 50% | +0.1% |
-| monetary_policy (Fed chair transition) | 50% | -0.1% |
-| tariff_policy | 38% | -0.3% |
-| middle_east_conflict_deescalation | 40% | -1.1% |
-| crypto_policy | 0% | **-15.4%** |
+| category | independent dates | win rate | avg return/trade |
+|---|---|---|---|
+| **Middle East escalation** (long oil/defense, short airlines) | **7** | **64%** | **+2.4%** |
+| tariff_policy_reversal | 1 | 50% | +0.1% |
+| monetary_policy (Fed chair transition) | 2 | 50% | -0.1% |
+| tariff_policy | 5 | 38% | -0.3% |
+| Middle East **de-escalation** (short oil/defense on ceasefires) | 3 | 38% | -0.9% |
+| crypto_policy | 1 | 0% | **-15.4%** |
 
-Two things worth being straight about:
+("independent dates" matters more than the raw signal count in
+`backtest-trump-events`' own output — that table counts one row per
+*ticker*, so e.g. 22 middle-east-escalation signals are really only 7
+distinct announcements, each traded across several tickers.)
 
-1. **The Iran/Middle East category is the one that actually looks
-   promising** — consistent with the original "he's moving oil and defense
-   stocks with this policy" instinct — but it's built from only 5 distinct
-   announcement dates, not a statistically meaningful sample. Encouraging,
-   not proven.
-2. **The crypto trade was a clear, real miss**: the May 2026 executive
+Three things worth being straight about:
+
+1. **The escalation side of the Iran/Middle East trade is the one real
+   finding here** — 7 independent dates (the March and June 2025 Houthi/Iran
+   strikes, four 2026 Iran-war escalations) at a 64% win rate and +2.4%
+   average is more consistent than everything else in the table, and
+   directly supports the original "he's moving oil and defense stocks with
+   this policy" instinct. Still a small sample — call it encouraging, not
+   proven — but it's the one category where the data holds together rather
+   than looking like noise.
+2. **The de-escalation side does not work** — shorting oil/defense when a
+   ceasefire is announced lost money more often than not (38% win rate).
+   The honest read: markets treat these ceasefires as fragile and don't
+   fully unwind the conflict risk premium, so "buy the escalation" is a
+   meaningfully different (and better-supported) trade than "sell the
+   ceasefire" — worth knowing before assuming the pattern is symmetric.
+3. **The crypto trade was a clear, real miss**: the May 2026 executive
    order integrating crypto into the financial system looked like an
    obvious "long Coinbase/bitcoin" call, and both positions lost 15%+ over
    the following two weeks anyway — a reminder that "the policy sounds
-   good for the sector" and "the trade makes money" are different claims,
-   and this system doesn't get to skip finding that out the hard way.
-3. **The bigger reason the total lags SPY so much**: this strategy is
+   good for the sector" and "the trade makes money" are different claims.
+4. **The bigger reason the total lags SPY so much**: this strategy is
    mostly in cash between signals (short holding windows, capped position
    sizes), so during a period where the index itself rose ~41%, just being
-   invested the whole time beats picking a handful of 10-21-day tactical
-   trades almost by construction — that's a structural cost of the
-   approach, not only a sign the picks were bad.
+   invested the whole time beats picking a handful of 10-day tactical
+   trades almost by construction — a structural cost of the approach, not
+   only a sign the picks were bad.
 
 ## Usage
 

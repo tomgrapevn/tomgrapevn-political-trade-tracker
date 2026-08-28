@@ -58,6 +58,26 @@ EVENT_CALENDAR: tuple[TrumpEvent, ...] = (
         "China Briefing; Euronews",
     ),
     TrumpEvent(
+        "2025-03-15", "middle_east_conflict", ("XLE", "USO"), "long",
+        "Trump orders 'decisive' US strikes on Iran-aligned Houthis in Yemen after Red Sea shipping attacks resume.",
+        "CNN 2025-03-15; ABC News",
+    ),
+    TrumpEvent(
+        "2025-03-15", "middle_east_conflict", ("JETS",), "short",
+        "Same Houthi-strikes event — Red Sea shipping/oil-cost shock.",
+        "CNN 2025-03-15",
+    ),
+    TrumpEvent(
+        "2025-05-06", "middle_east_conflict_deescalation", ("XLE", "USO"), "short",
+        "Trump declares ceasefire with the Houthis (Oman-mediated), strikes stop 'effective immediately'.",
+        "Wikipedia '2025 United States-Houthi ceasefire'; FDD",
+    ),
+    TrumpEvent(
+        "2025-05-06", "middle_east_conflict_deescalation", ("JETS",), "long",
+        "Same Houthi-ceasefire event.",
+        "Wikipedia '2025 United States-Houthi ceasefire'",
+    ),
+    TrumpEvent(
         "2025-06-22", "middle_east_conflict", ("XLE", "USO", "LMT", "RTX", "NOC", "GD"), "long",
         "US strikes on Iranian nuclear sites (Fordow, Natanz, Isfahan) — start of the '12 Day War'.",
         "Wikipedia '2025 United States strikes on Iranian nuclear sites'",
@@ -131,6 +151,11 @@ EVENT_CALENDAR: tuple[TrumpEvent, ...] = (
         "2026-08-14", "middle_east_conflict", ("XLE", "USO"), "long",
         "Trump says he will designate the Strait of Hormuz a US territory 'pretty soon' amid ongoing blockade standoff.",
         "Al Jazeera 2026-08-16",
+    ),
+    TrumpEvent(
+        "2026-08-19", "middle_east_conflict", ("XLE", "USO"), "long",
+        "Trump announces 'Economic D-Day' against Iran — sanctions threat on any country/institution aiding Iran, after nuclear talks collapsed. Note: reported to have unsettled broader US markets too (Al Jazeera 2026-08-21), not a clean one-directional event — included for completeness even though the simple long-oil hypothesis may not hold here.",
+        "CNBC 2026-08-19; NPR 2026-08-21",
     ),
 )
 
