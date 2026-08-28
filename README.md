@@ -139,6 +139,23 @@ Given that, **the mirror-trade strategy currently only has insider (Musk/Bezos)
 signals to work with, not Congress** — see "A real result" below for what
 that actually produced.
 
+### Trump policy calendar (a workaround for GDELT being down)
+
+`tracker/data/trump_events.py` + `backtest-trump-events` is a substitute for
+the live-news event-driven strategy while GDELT's certificate is broken: a
+hand-verified, dated, sourced calendar of 18 real Trump administration
+announcements (tariffs, the 2025 and 2026 Iran conflicts, the Fed chair
+transition, crypto policy) from Feb 2025 through Aug 2026, each mapped to a
+directional ticker hypothesis the same way `event_map.py` works. It is
+**not** a live feed — it won't pick up new announcements on its own; add
+rows to `EVENT_CALENDAR` by hand as things happen, each with a real source.
+
+Read the result with real caution: 18 events is a small, manually-curated
+sample (not independently drawn — the "n_signals" column in the category
+breakdown counts one row per *ticker*, so e.g. "19 middle_east_conflict
+signals" is really only 5 distinct dates). Good for a real, checkable
+first look — not for a statistically confident conclusion either way.
+
 This repo was originally built in a sandboxed session whose outbound network
 was restricted to PyPI and GitHub only, so:
 
@@ -187,6 +204,43 @@ an edge over the S&P 500 in the one real test available. Widening
 working would all add more signal to actually evaluate — right now there
 just isn't much to work with.
 
+### A second real result: reacting to Trump's policy announcements
+
+`backtest-trump-events --holding-days 10` against the 18-event calendar
+above and real price history: **+0.6% total return vs. +41% for SPY
+buy-and-hold** over the same window (Feb 2025 - Aug 2026) — again,
+substantially underperforming the market. But the category breakdown is
+more interesting than the headline number:
+
+| category | win rate | avg return/trade |
+|---|---|---|
+| middle_east_conflict (Iran-related: oil/defense long, airlines short) | 58% | **+2.0%** |
+| tariff_policy_reversal | 50% | +0.1% |
+| monetary_policy (Fed chair transition) | 50% | -0.1% |
+| tariff_policy | 38% | -0.3% |
+| middle_east_conflict_deescalation | 40% | -1.1% |
+| crypto_policy | 0% | **-15.4%** |
+
+Two things worth being straight about:
+
+1. **The Iran/Middle East category is the one that actually looks
+   promising** — consistent with the original "he's moving oil and defense
+   stocks with this policy" instinct — but it's built from only 5 distinct
+   announcement dates, not a statistically meaningful sample. Encouraging,
+   not proven.
+2. **The crypto trade was a clear, real miss**: the May 2026 executive
+   order integrating crypto into the financial system looked like an
+   obvious "long Coinbase/bitcoin" call, and both positions lost 15%+ over
+   the following two weeks anyway — a reminder that "the policy sounds
+   good for the sector" and "the trade makes money" are different claims,
+   and this system doesn't get to skip finding that out the hard way.
+3. **The bigger reason the total lags SPY so much**: this strategy is
+   mostly in cash between signals (short holding windows, capped position
+   sizes), so during a period where the index itself rose ~41%, just being
+   invested the whole time beats picking a handful of 10-21-day tactical
+   trades almost by construction — that's a structural cost of the
+   approach, not only a sign the picks were bad.
+
 ## Usage
 
 ```bash
@@ -204,6 +258,11 @@ python -m tracker.cli backtest-mirror --holding-days 21
 # Backtest "react to policy news via the event_map hypothesis table"
 python -m tracker.cli backtest-events --holding-days 10 --min-article-count 3
 # -> reports/backtest_events.md: same shape, broken down by event category.
+
+# Backtest reacting to the hand-verified Trump policy calendar (works right
+# now even with GDELT down — see "Trump policy calendar" above).
+python -m tracker.cli backtest-trump-events --holding-days 10
+python -m tracker.cli backtest-walkforward --strategy trump-events --train-months 6 --test-months 1
 
 # THE HONEST 12-MONTH TEST: walk the model forward month by month, training
 # only on data before each test block, and compare the model-filtered

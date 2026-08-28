@@ -117,6 +117,44 @@ def _event_pipeline(holding_days: int, min_article_count: int):
     return trades, prices
 
 
+def _trump_event_pipeline(holding_days: int):
+    from tracker.data.trump_events import all_tickers as trump_tickers
+    from tracker.data.trump_events import to_signals_frame
+
+    signals = to_signals_frame()
+    tickers = sorted(set(trump_tickers()) | {prices_data.BENCHMARK_TICKER})
+    prices = prices_data.fetch_prices(tickers)
+    trades = resolve_trades(signals, prices, holding_days=holding_days, transaction_cost_bps=settings.transaction_cost_bps)
+    return trades, prices
+
+
+@cli.command("backtest-trump-events")
+@click.option("--holding-days", default=10, show_default=True)
+def backtest_trump_events(holding_days: int):
+    """Backtest reacting to a hand-verified calendar of Trump administration
+    policy/geopolitical announcements (tracker/data/trump_events.py) — a
+    real, dated, sourced substitute for the live-news event-driven strategy
+    while GDELT's certificate is broken (see README)."""
+    trades, prices = _trump_event_pipeline(holding_days)
+    if trades.empty:
+        click.echo("No resolvable trades — check trump_events.py dates against available price history.")
+        return
+
+    capital_usd, fx_rate = fx.resolve_capital_usd()
+    calendar = prices[prices_data.BENCHMARK_TICKER].index
+    sim = simulate_portfolio(trades, calendar, initial_capital=capital_usd, max_position_pct=settings.max_position_pct)
+    benchmark_curve = buy_and_hold_benchmark(prices[prices_data.BENCHMARK_TICKER], calendar, capital_usd)
+    report = build_report(sim.equity_curve, trades, benchmark_curve)
+    click.echo(f"Starting capital: £{settings.initial_capital_gbp:,.2f} -> ${capital_usd:,.2f} @ {fx_rate:.4f} GBPUSD")
+
+    breakdown = event_driven.category_hit_rates(trades)
+    content = render_report("Trump Policy Calendar Strategy Backtest", report, trades, breakdown, "category")
+    out_path = REPORTS_DIR / "backtest_trump_events.md"
+    save_report(content, str(out_path))
+    click.echo(content)
+    click.echo(f"\nSaved to {out_path}")
+
+
 @cli.command("backtest-events")
 @click.option("--holding-days", default=10, show_default=True)
 @click.option("--min-article-count", default=3, show_default=True)
@@ -172,7 +210,7 @@ def train_events(model_type: str, holding_days: int, min_article_count: int):
 
 
 @cli.command("backtest-walkforward")
-@click.option("--strategy", type=click.Choice(["mirror", "events"]), required=True)
+@click.option("--strategy", type=click.Choice(["mirror", "events", "trump-events"]), required=True)
 @click.option("--train-months", default=6, show_default=True)
 @click.option("--test-months", default=1, show_default=True)
 @click.option("--model-type", default="gbm", type=click.Choice(["gbm", "logreg"]))
@@ -195,11 +233,16 @@ def backtest_walkforward(
         trades, prices = _mirror_pipeline(hd, None)
         build_features_fn = feature_lib.build_mirror_features
         label = "Mirror-Trade"
-    else:
+    elif strategy == "events":
         hd = holding_days or 10
         trades, prices = _event_pipeline(hd, 3)
         build_features_fn = feature_lib.build_event_features
         label = "Event-Driven"
+    else:
+        hd = holding_days or 10
+        trades, prices = _trump_event_pipeline(hd)
+        build_features_fn = feature_lib.build_event_features
+        label = "Trump Policy Calendar"
 
     if trades.empty:
         click.echo("No resolvable trades to walk-forward over.")
