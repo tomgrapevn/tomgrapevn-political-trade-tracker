@@ -65,5 +65,15 @@ class Settings:
     # by whatever cron/trigger invokes `python -m tracker.cli daily-run`.
     daily_run_time_uk: str = os.getenv("DAILY_RUN_TIME_UK", "07:00")
 
+    # What "beating the market" is measured against. Default is a proxy,
+    # not an exact match: BlackRock's "iShares World Equity Index Fund"
+    # (e.g. as offered through Wise Assets UK) tracks the MSCI World Index
+    # but is a Luxembourg-domiciled OEIC with no exchange ticker to pull
+    # live prices from. SWDA.L (iShares Core MSCI World UCITS ETF, GBP,
+    # same provider, same underlying index) is the closest fetchable
+    # stand-in — expect returns to track closely but not identically
+    # (different share class, minor fee/tracking-error differences).
+    benchmark_ticker: str = os.getenv("BENCHMARK_TICKER", "SWDA.L")
+
 
 settings = Settings()

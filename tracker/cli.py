@@ -52,7 +52,7 @@ def fetch_data(force_refresh: bool):
     click.echo(f"Insider (Form 4) trades: {len(insiders)} rows for {', '.join(settings.watched_insiders)}")
 
     tickers = sorted(
-        set(df["ticker"].dropna()) | set(insiders["ticker"].dropna()) | set(event_tickers()) | {prices_data.BENCHMARK_TICKER}
+        set(df["ticker"].dropna()) | set(insiders["ticker"].dropna()) | set(event_tickers()) | {settings.benchmark_ticker}
     )
     prices = prices_data.fetch_prices(tickers, use_cache=not force_refresh)
     click.echo(f"Prices: fetched {len(prices)}/{len(tickers)} tickers")
@@ -75,7 +75,7 @@ def _mirror_pipeline(holding_days: int, min_lag_days: int | None):
     if min_lag_days is not None:
         signals = signals[signals["disclosure_lag_days"] >= min_lag_days]
 
-    tickers = sorted(set(signals["ticker"]) | {prices_data.BENCHMARK_TICKER})
+    tickers = sorted(set(signals["ticker"]) | {settings.benchmark_ticker})
     prices = prices_data.fetch_prices(tickers)
     trades = resolve_trades(signals, prices, holding_days=holding_days, transaction_cost_bps=settings.transaction_cost_bps)
     return trades, prices
@@ -92,14 +92,14 @@ def backtest_mirror(holding_days: int, min_lag_days: int | None):
         return
 
     capital_usd, fx_rate = fx.resolve_capital_usd()
-    calendar = prices[prices_data.BENCHMARK_TICKER].index
+    calendar = prices[settings.benchmark_ticker].index
     sim = simulate_portfolio(trades, calendar, initial_capital=capital_usd, max_position_pct=settings.max_position_pct)
-    benchmark_curve = buy_and_hold_benchmark(prices[prices_data.BENCHMARK_TICKER], calendar, capital_usd)
+    benchmark_curve = buy_and_hold_benchmark(prices[settings.benchmark_ticker], calendar, capital_usd)
     report = build_report(sim.equity_curve, trades, benchmark_curve)
     click.echo(f"Starting capital: £{settings.initial_capital_gbp:,.2f} -> ${capital_usd:,.2f} @ {fx_rate:.4f} GBPUSD")
 
     breakdown = mirror_trade.member_win_rates(trades)
-    content = render_report("Mirror-Trade Strategy Backtest", report, trades, breakdown, "member")
+    content = render_report("Mirror-Trade Strategy Backtest", report, trades, breakdown, "member", settings.benchmark_ticker)
     out_path = REPORTS_DIR / "backtest_mirror.md"
     save_report(content, str(out_path))
     click.echo(content)
@@ -111,7 +111,7 @@ def _event_pipeline(holding_days: int, min_article_count: int):
     daily = news_data.daily_event_dates(news)
     signals = event_driven.generate_signals(daily, min_article_count=min_article_count)
 
-    tickers = sorted(set(signals["ticker"]) | {prices_data.BENCHMARK_TICKER}) if not signals.empty else [prices_data.BENCHMARK_TICKER]
+    tickers = sorted(set(signals["ticker"]) | {settings.benchmark_ticker}) if not signals.empty else [settings.benchmark_ticker]
     prices = prices_data.fetch_prices(tickers)
     trades = resolve_trades(signals, prices, holding_days=holding_days, transaction_cost_bps=settings.transaction_cost_bps)
     return trades, prices
@@ -122,7 +122,7 @@ def _trump_event_pipeline(holding_days: int):
     from tracker.data.trump_events import to_signals_frame
 
     signals = to_signals_frame()
-    tickers = sorted(set(trump_tickers()) | {prices_data.BENCHMARK_TICKER})
+    tickers = sorted(set(trump_tickers()) | {settings.benchmark_ticker})
     prices = prices_data.fetch_prices(tickers)
     trades = resolve_trades(signals, prices, holding_days=holding_days, transaction_cost_bps=settings.transaction_cost_bps)
     return trades, prices
@@ -141,15 +141,61 @@ def backtest_trump_events(holding_days: int):
         return
 
     capital_usd, fx_rate = fx.resolve_capital_usd()
-    calendar = prices[prices_data.BENCHMARK_TICKER].index
+    calendar = prices[settings.benchmark_ticker].index
     sim = simulate_portfolio(trades, calendar, initial_capital=capital_usd, max_position_pct=settings.max_position_pct)
-    benchmark_curve = buy_and_hold_benchmark(prices[prices_data.BENCHMARK_TICKER], calendar, capital_usd)
+    benchmark_curve = buy_and_hold_benchmark(prices[settings.benchmark_ticker], calendar, capital_usd)
     report = build_report(sim.equity_curve, trades, benchmark_curve)
     click.echo(f"Starting capital: £{settings.initial_capital_gbp:,.2f} -> ${capital_usd:,.2f} @ {fx_rate:.4f} GBPUSD")
 
     breakdown = event_driven.category_hit_rates(trades)
-    content = render_report("Trump Policy Calendar Strategy Backtest", report, trades, breakdown, "category")
+    content = render_report("Trump Policy Calendar Strategy Backtest", report, trades, breakdown, "category", settings.benchmark_ticker)
     out_path = REPORTS_DIR / "backtest_trump_events.md"
+    save_report(content, str(out_path))
+    click.echo(content)
+    click.echo(f"\nSaved to {out_path}")
+
+
+@cli.command("backtest-core-satellite")
+@click.option(
+    "--strategy",
+    type=click.Choice(["trump-escalation-only", "trump-all"]),
+    default="trump-escalation-only",
+    show_default=True,
+    help="trump-escalation-only uses just the validated Middle East escalation signal; trump-all uses the whole calendar.",
+)
+@click.option("--holding-days", default=10, show_default=True)
+@click.option("--satellite-pct", default=0.15, show_default=True, help="Fraction of current equity reallocated from the benchmark into each tilt.")
+def backtest_core_satellite(strategy: str, holding_days: int, satellite_pct: float):
+    """Stay fully invested in the benchmark (settings.benchmark_ticker),
+    fund tactical tilts from benchmark units instead of cash. Answers "does
+    layering this signal on top of just holding the fund beat holding the
+    fund alone" — see tracker/backtest/core_satellite.py and README "Core +
+    satellite" for why this is a different (and more realistic) question
+    than testing the signal against a mostly-cash portfolio."""
+    from tracker.backtest.core_satellite import simulate_core_satellite
+
+    trades, prices = _trump_event_pipeline(holding_days)
+    if strategy == "trump-escalation-only":
+        trades = trades[trades["category"] == "middle_east_conflict"]
+    if trades.empty:
+        click.echo("No resolvable trades for this strategy.")
+        return
+
+    capital_usd, fx_rate = fx.resolve_capital_usd()
+    benchmark_prices = prices[settings.benchmark_ticker]
+    calendar = benchmark_prices.index
+
+    sim = simulate_core_satellite(trades, benchmark_prices, calendar, initial_capital=capital_usd, satellite_pct=satellite_pct)
+    benchmark_curve = buy_and_hold_benchmark(benchmark_prices, calendar, capital_usd)
+    report = build_report(sim.equity_curve, trades, benchmark_curve)
+
+    click.echo(f"Benchmark: {settings.benchmark_ticker}")
+    click.echo(f"Starting capital: £{settings.initial_capital_gbp:,.2f} -> ${capital_usd:,.2f} @ {fx_rate:.4f} GBPUSD")
+    click.echo(f"Strategy final value: ${sim.equity_curve.iloc[-1]:,.2f} = £{sim.equity_curve.iloc[-1] / fx_rate:,.2f}")
+    click.echo(f"Pure benchmark final value: ${benchmark_curve.iloc[-1]:,.2f} = £{benchmark_curve.iloc[-1] / fx_rate:,.2f}")
+
+    content = render_report(f"Core + Satellite ({strategy}) vs. {settings.benchmark_ticker}", report, trades, benchmark_label=settings.benchmark_ticker)
+    out_path = REPORTS_DIR / "backtest_core_satellite.md"
     save_report(content, str(out_path))
     click.echo(content)
     click.echo(f"\nSaved to {out_path}")
@@ -166,14 +212,14 @@ def backtest_events(holding_days: int, min_article_count: int):
         return
 
     capital_usd, fx_rate = fx.resolve_capital_usd()
-    calendar = prices[prices_data.BENCHMARK_TICKER].index
+    calendar = prices[settings.benchmark_ticker].index
     sim = simulate_portfolio(trades, calendar, initial_capital=capital_usd, max_position_pct=settings.max_position_pct)
-    benchmark_curve = buy_and_hold_benchmark(prices[prices_data.BENCHMARK_TICKER], calendar, capital_usd)
+    benchmark_curve = buy_and_hold_benchmark(prices[settings.benchmark_ticker], calendar, capital_usd)
     report = build_report(sim.equity_curve, trades, benchmark_curve)
     click.echo(f"Starting capital: £{settings.initial_capital_gbp:,.2f} -> ${capital_usd:,.2f} @ {fx_rate:.4f} GBPUSD")
 
     breakdown = event_driven.category_hit_rates(trades)
-    content = render_report("Event-Driven Strategy Backtest", report, trades, breakdown, "category")
+    content = render_report("Event-Driven Strategy Backtest", report, trades, breakdown, "category", settings.benchmark_ticker)
     out_path = REPORTS_DIR / "backtest_events.md"
     save_report(content, str(out_path))
     click.echo(content)
@@ -265,10 +311,10 @@ def backtest_walkforward(
     capital_usd, fx_rate = fx.resolve_capital_usd()
     click.echo(f"\nStarting capital: £{settings.initial_capital_gbp:,.2f} -> ${capital_usd:,.2f} @ {fx_rate:.4f} GBPUSD")
 
-    calendar = prices[prices_data.BENCHMARK_TICKER].index
+    calendar = prices[settings.benchmark_ticker].index
     oos_start = result.all_candidate_trades["signal_date"].min()
     calendar = calendar[calendar >= oos_start]
-    benchmark_curve = buy_and_hold_benchmark(prices[prices_data.BENCHMARK_TICKER], calendar, capital_usd)
+    benchmark_curve = buy_and_hold_benchmark(prices[settings.benchmark_ticker], calendar, capital_usd)
 
     for title, trade_set in (
         ("Model-filtered (out-of-sample)", result.taken_trades),

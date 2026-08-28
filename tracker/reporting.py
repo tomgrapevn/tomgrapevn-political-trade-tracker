@@ -31,6 +31,7 @@ def render_report(
     trades: pd.DataFrame,
     breakdown: pd.DataFrame | None = None,
     breakdown_label: str = "member",
+    benchmark_label: str = "SPY",
 ) -> str:
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines = [
@@ -49,7 +50,7 @@ def render_report(
         f"| Max drawdown | {_fmt_pct(report.max_drawdown)} |",
         f"| Win rate (per trade) | {_fmt_pct(report.win_rate)} |",
         f"| Number of trades | {report.n_trades} |",
-        f"| Benchmark (SPY buy & hold) total return | {_fmt_pct(report.benchmark_total_return)} |",
+        f"| Benchmark ({benchmark_label} buy & hold) total return | {_fmt_pct(report.benchmark_total_return)} |",
         f"| Excess return vs. benchmark | {_fmt_pct(report.excess_return_vs_benchmark)} |",
         "",
     ]

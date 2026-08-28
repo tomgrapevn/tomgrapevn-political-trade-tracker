@@ -253,6 +253,38 @@ Three things worth being straight about:
    trades almost by construction — a structural cost of the approach, not
    only a sign the picks were bad.
 
+### Core + satellite: beating the fund, not just the signal
+
+`tracker/backtest/core_satellite.py` (`backtest-core-satellite`) fixes the
+cash-drag problem directly: stay 100% invested in `settings.benchmark_ticker`
+at all times, and fund each tilt by temporarily selling benchmark units
+rather than holding cash — the tilt's gain or loss lands on top of the
+benchmark's own return instead of instead of it.
+
+Real result, last 12 months, £5,000 starting capital, benchmark = SWDA.L
+(the MSCI World proxy from the section above):
+
+| Approach | Final value | Return | Max drawdown |
+|---|---|---|---|
+| Just holding the fund | £6,035 | +20.7% | -27.4% |
+| Core + satellite, **all** Trump-calendar categories | £6,043 | +20.9% | -26.0% |
+| Core + satellite, **escalation-only** (the validated signal) | **£6,532** | **+30.6%** | **-26.0%** |
+
+The escalation-only version is the first thing in this whole project that
+has actually beaten the benchmark — by about £497 on £5,000, with a
+*slightly smaller* max drawdown than just holding the fund outright (the
+tilt happens to land during the same market stress that also hits the
+broad index, so it isn't purely adding risk). Trading every category
+instead of just the validated one comes out roughly flat against the fund
+— consistent with the earlier finding that only the escalation side of
+this calendar has real support.
+
+Keep the caveat sizing: this is still 12 trades from 7 independent dates.
+A real edge, worth continuing to track — not yet a large enough sample to
+bet heavily on. `--satellite-pct` (default 0.15) is the risk knob: raising
+it scales the edge and the drawdown together, it doesn't get you one
+without the other.
+
 ## Usage
 
 ```bash
@@ -275,6 +307,11 @@ python -m tracker.cli backtest-events --holding-days 10 --min-article-count 3
 # now even with GDELT down — see "Trump policy calendar" above).
 python -m tracker.cli backtest-trump-events --holding-days 10
 python -m tracker.cli backtest-walkforward --strategy trump-events --train-months 6 --test-months 1
+
+# Stay fully invested in the benchmark, tilt on top of it instead of
+# trading from cash — see "Core + satellite" above for why this is the
+# version that actually beat the fund.
+python -m tracker.cli backtest-core-satellite --strategy trump-escalation-only
 
 # THE HONEST 12-MONTH TEST: walk the model forward month by month, training
 # only on data before each test block, and compare the model-filtered
@@ -354,6 +391,7 @@ tracker/
     event_driven.py        daily news events -> signal rows via event_map
   backtest/
     engine.py               trade resolution + portfolio simulation
+    core_satellite.py        stay invested in the benchmark, tilt on top
     metrics.py                CAGR / Sharpe / max drawdown / win rate
     walkforward.py             rolling train/test folds, no cherry-picking
   models/
