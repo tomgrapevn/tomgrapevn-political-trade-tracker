@@ -285,6 +285,57 @@ bet heavily on. `--satellite-pct` (default 0.15) is the risk knob: raising
 it scales the edge and the drawdown together, it doesn't get you one
 without the other.
 
+### Generalizing the escalation pattern beyond Trump/Iran
+
+The obvious question about a 7-date pattern: is "major conflict escalation
+→ long oil/defense" a real market mechanism, or a Trump/Iran quirk that
+happened to look good? `tracker/data/geopolitical_events.py` adds a second
+hand-verified calendar — Russia-Ukraine (the August 2024 Kursk incursion,
+the December 2025 peace-talks defense selloff) and China-Taiwan (four
+dated PLA military exercises, "Joint Sword"/"Strait Thunder"/"Justice
+Mission", 2024-2025, adding a short-semiconductors leg since these
+specifically move TSMC-adjacent stocks) — and
+`tracker/data/combined_conflict.py` merges it with the Iran calendar for
+one test of the general hypothesis, same tickers/direction logic as
+before, same core+satellite engine.
+
+**It held up. It got stronger, not weaker:**
+
+| Signal | Independent dates | Win rate | Avg return/trade |
+|---|---|---|---|
+| Iran only (previous finding) | 7 | 64% | +2.4% |
+| Ukraine + Taiwan only (new) | 5 | 75% | +1.6% |
+| **All three combined** | **11** | **70%** | **+2.0%** |
+
+De-escalation still doesn't work generalized either (42% win rate,
+-0.8% avg across 4 dates) — same asymmetry as before, now confirmed
+across three separate conflicts rather than one.
+
+Run through core + satellite (`backtest-core-satellite --strategy
+generalized-escalation-only`), £5,000, last 12 months:
+
+| Approach | Final value | Return |
+|---|---|---|
+| Just holding the fund | £6,035 | +20.7% |
+| Core + satellite, Iran-only escalation | £6,532 | +30.6% |
+| **Core + satellite, generalized (Iran + Ukraine + Taiwan) escalation** | **£6,678** | **+33.6%** |
+| Core + satellite, generalized escalation **+ de-escalation** | £6,279 | +25.6% |
+
+Widening the sample made the result *better*, not diluted — real evidence
+this is closer to "markets reliably reprice defense/oil/semis on state-conflict
+escalation" than "one lucky reading of Trump-Iran." Still 11 dates, not
+110 — a genuine, growing case, not a proven law. Max drawdown is the same
+-26% either way; adding more escalation sources adds return, not extra
+downside, in this sample.
+
+**What I looked into and didn't add:** OPEC+ supply decisions (a
+structurally different, higher-frequency mechanism) — I couldn't pin down
+specific "surprise" decision dates with the confidence bar the rest of
+this calendar holds itself to (OPEC+ outcomes are often pre-signaled over
+weeks, making "the surprise date" genuinely ambiguous, unlike a military
+strike). Worth a dedicated pass later rather than a guessed date in a
+financial model.
+
 ## Usage
 
 ```bash
@@ -312,6 +363,10 @@ python -m tracker.cli backtest-walkforward --strategy trump-events --train-month
 # trading from cash — see "Core + satellite" above for why this is the
 # version that actually beat the fund.
 python -m tracker.cli backtest-core-satellite --strategy trump-escalation-only
+
+# The generalized version — Iran + Russia-Ukraine + China-Taiwan escalations
+# combined — see "Generalizing the escalation pattern" above.
+python -m tracker.cli backtest-core-satellite --strategy generalized-escalation-only
 
 # THE HONEST 12-MONTH TEST: walk the model forward month by month, training
 # only on data before each test block, and compare the model-filtered
@@ -386,6 +441,9 @@ tracker/
     prices.py               yfinance historical OHLCV + forward-return helper
     news.py                  GDELT policy-news search + daily aggregation
     event_map.py              keyword -> ticker/direction hypothesis table
+    trump_events.py            hand-verified Trump policy/geopolitical calendar
+    geopolitical_events.py       hand-verified Russia-Ukraine/China-Taiwan calendar
+    combined_conflict.py           merges the above into one escalation signal
   signals/
     mirror_trade.py        disclosures (Congress + insider) -> signal rows
     event_driven.py        daily news events -> signal rows via event_map

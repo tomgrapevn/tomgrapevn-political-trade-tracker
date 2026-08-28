@@ -155,13 +155,35 @@ def backtest_trump_events(holding_days: int):
     click.echo(f"\nSaved to {out_path}")
 
 
+def _generalized_conflict_pipeline(holding_days: int, include_deescalation: bool):
+    from tracker.data.combined_conflict import all_conflict_tickers, combined_conflict_signals
+
+    signals = combined_conflict_signals(include_deescalation=include_deescalation)
+    tickers = sorted(set(all_conflict_tickers()) | {settings.benchmark_ticker})
+    prices = prices_data.fetch_prices(tickers)
+    trades = resolve_trades(signals, prices, holding_days=holding_days, transaction_cost_bps=settings.transaction_cost_bps)
+    return trades, prices
+
+
+_CORE_SATELLITE_STRATEGIES = [
+    "trump-escalation-only",
+    "trump-all",
+    "generalized-escalation-only",
+    "generalized-with-deescalation",
+]
+
+
 @cli.command("backtest-core-satellite")
 @click.option(
     "--strategy",
-    type=click.Choice(["trump-escalation-only", "trump-all"]),
+    type=click.Choice(_CORE_SATELLITE_STRATEGIES),
     default="trump-escalation-only",
     show_default=True,
-    help="trump-escalation-only uses just the validated Middle East escalation signal; trump-all uses the whole calendar.",
+    help=(
+        "trump-*: Trump policy calendar only. generalized-*: Trump-Iran + "
+        "Russia-Ukraine + China-Taiwan escalations combined (tracker/data/combined_conflict.py) "
+        "— tests whether the pattern is Trump/Iran-specific or general."
+    ),
 )
 @click.option("--holding-days", default=10, show_default=True)
 @click.option("--satellite-pct", default=0.15, show_default=True, help="Fraction of current equity reallocated from the benchmark into each tilt.")
@@ -174,9 +196,14 @@ def backtest_core_satellite(strategy: str, holding_days: int, satellite_pct: flo
     than testing the signal against a mostly-cash portfolio."""
     from tracker.backtest.core_satellite import simulate_core_satellite
 
-    trades, prices = _trump_event_pipeline(holding_days)
-    if strategy == "trump-escalation-only":
-        trades = trades[trades["category"] == "middle_east_conflict"]
+    if strategy.startswith("trump"):
+        trades, prices = _trump_event_pipeline(holding_days)
+        if strategy == "trump-escalation-only":
+            trades = trades[trades["category"] == "middle_east_conflict"]
+    else:
+        include_deescalation = strategy == "generalized-with-deescalation"
+        trades, prices = _generalized_conflict_pipeline(holding_days, include_deescalation)
+
     if trades.empty:
         click.echo("No resolvable trades for this strategy.")
         return
