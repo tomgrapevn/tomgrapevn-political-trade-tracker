@@ -460,12 +460,42 @@ diverse data was added** — the real test of whether it was fragile or
 robust. Adding these 4 new dates (9 more resolved trades) barely moved the
 aggregate: win rate 69.1% (was 69.6%), average return per trade +2.0%
 (unchanged), now across 15 independent dates instead of 11. Through core +
-satellite, full history (since May 2024) on £5,000: **£7,809 (+56.2%) vs.
-the fund's £6,900 (+38.0%)** — an ~18-point edge, in line with what the
+satellite, full history (since May 2024) on £5,000: £7,809 (+56.2%) vs.
+the fund's £6,900 (+38.0%) — an ~18-point edge, in line with what the
 Iran/Ukraine/Taiwan-only version already showed. That consistency under
 expansion is more reassuring than the original 11-date finding on its own
 — an overfit pattern would have degraded as new, independent cases were
 added; this one didn't.
+
+### Found via the live monitor, verified, and added: a real gap it caught
+
+Once `monitor-news` (see "Live monitoring" below) was running, it
+surfaced a real, current event outside the hand-checked calendar: the US
+Dept. of War's own newsroom feed showed a second wave of Iran strikes
+running from at least March through July 2026 that the calendar had
+missed entirely (it only had the Feb 28 - Apr 8 "Epic Fury" campaign and
+the Apr 13 blockade). Cross-checked against Al Jazeera before adding
+anything: the April ceasefire broke down and the US resumed major strikes
+on **July 8, 2026** ("the most severe [strikes] since" the mid-June
+truce, per Al Jazeera; corroborated by the Dept. of War's own dated
+releases through "13th night of strikes," July 24). Added as a proper,
+sourced calendar entry (not just left as an unverified RSS match) — this
+is exactly the verify-before-trusting standard every other entry in this
+project holds itself to, just triggered by an automated feed instead of a
+manual literature search.
+
+Rerunning the £5,000/12-month and full-history numbers with this
+addition:
+
+| Window | Independent dates | Final value | Return | vs. fund |
+|---|---|---|---|---|
+| Last 12 months | 6 | **£6,760** | +35.2% | fund: £5,973 (+19.5%) |
+| Full history (since May 2024) | 16 | **£7,962** | +59.2% | fund: £6,900 (+38.0%) |
+
+Both improved slightly on the pre-update numbers (was £6,630/+32.6% and
+£7,809/+56.2%) — real, additional, independently-verified data continuing
+to support the pattern rather than diluting it, now for the fourth time
+running.
 
 ## Usage
 

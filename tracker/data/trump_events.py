@@ -138,6 +138,16 @@ EVENT_CALENDAR: tuple[TrumpEvent, ...] = (
         "Wikipedia '2026 United States naval blockade of Iran'",
     ),
     TrumpEvent(
+        "2026-07-08", "middle_east_conflict", ("XLE", "USO", "LMT", "RTX", "NOC", "GD"), "long",
+        "The April ceasefire collapses; Trump declares the deal 'over' and the US resumes major strikes on Iran (Iranshahr, Bandar Abbas, Konarak, Chabahar, Bushehr, Aq Qala) — found via the live RSS monitor (Dept. of War newsroom feed), verified against an independent source before adding.",
+        "Al Jazeera 2026-07-08; Dept. of War newsroom (multiple dated releases, e.g. 'U.S. Concludes 13th Night of Strikes on Iranian Military Targets', 2026-07-24)",
+    ),
+    TrumpEvent(
+        "2026-07-08", "middle_east_conflict", ("JETS",), "short",
+        "Same event as above.",
+        "Al Jazeera 2026-07-08",
+    ),
+    TrumpEvent(
         "2026-05-19", "crypto_policy", ("COIN", "BITO"), "long",
         "Executive order integrating crypto/fintech into the traditional financial system; Fed to assess crypto master-account access.",
         "White House fact sheet 2026-05-19; Bitcoin Magazine",
