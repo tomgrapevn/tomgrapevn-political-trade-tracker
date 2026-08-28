@@ -155,6 +155,42 @@ def backtest_trump_events(holding_days: int):
     click.echo(f"\nSaved to {out_path}")
 
 
+def _macro_pipeline(holding_days: int):
+    from tracker.data.macro_calendar import all_tickers as macro_tickers
+    from tracker.data.macro_calendar import to_signals_frame as macro_signals_frame
+
+    signals = macro_signals_frame()
+    tickers = sorted(set(macro_tickers()) | {settings.benchmark_ticker})
+    prices = prices_data.fetch_prices(tickers)
+    trades = resolve_trades(signals, prices, holding_days=holding_days, transaction_cost_bps=settings.transaction_cost_bps)
+    return trades, prices
+
+
+@cli.command("backtest-macro")
+@click.option("--holding-days", default=1, show_default=True, help="1 = the documented pre-FOMC drift window (close before -> close on decision day).")
+def backtest_macro(holding_days: int):
+    """Backtest the pre-FOMC announcement drift (tracker/data/macro_calendar.py)
+    — a scheduled, recurring, non-crisis alternative to the conflict
+    calendars, sourced from the Fed's own published meeting calendar."""
+    trades, prices = _macro_pipeline(holding_days)
+    if trades.empty:
+        click.echo("No resolvable trades — check macro_calendar.py dates against available price history.")
+        return
+
+    capital_usd, fx_rate = fx.resolve_capital_usd()
+    calendar = prices[settings.benchmark_ticker].index
+    sim = simulate_portfolio(trades, calendar, initial_capital=capital_usd, max_position_pct=settings.max_position_pct)
+    benchmark_curve = buy_and_hold_benchmark(prices[settings.benchmark_ticker], calendar, capital_usd)
+    report = build_report(sim.equity_curve, trades, benchmark_curve)
+    click.echo(f"Starting capital: £{settings.initial_capital_gbp:,.2f} -> ${capital_usd:,.2f} @ {fx_rate:.4f} GBPUSD")
+
+    content = render_report("Pre-FOMC Drift Strategy Backtest", report, trades, benchmark_label=settings.benchmark_ticker)
+    out_path = REPORTS_DIR / "backtest_macro.md"
+    save_report(content, str(out_path))
+    click.echo(content)
+    click.echo(f"\nSaved to {out_path}")
+
+
 def _generalized_conflict_pipeline(holding_days: int, include_deescalation: bool):
     from tracker.data.combined_conflict import all_conflict_tickers, combined_conflict_signals
 
@@ -170,6 +206,7 @@ _CORE_SATELLITE_STRATEGIES = [
     "trump-all",
     "generalized-escalation-only",
     "generalized-with-deescalation",
+    "pre-fomc-drift",
 ]
 
 
@@ -185,9 +222,9 @@ _CORE_SATELLITE_STRATEGIES = [
         "— tests whether the pattern is Trump/Iran-specific or general."
     ),
 )
-@click.option("--holding-days", default=10, show_default=True)
+@click.option("--holding-days", default=None, type=int, help="Defaults to 10 for conflict strategies, 1 (the drift window) for pre-fomc-drift.")
 @click.option("--satellite-pct", default=0.15, show_default=True, help="Fraction of current equity reallocated from the benchmark into each tilt.")
-def backtest_core_satellite(strategy: str, holding_days: int, satellite_pct: float):
+def backtest_core_satellite(strategy: str, holding_days: int | None, satellite_pct: float):
     """Stay fully invested in the benchmark (settings.benchmark_ticker),
     fund tactical tilts from benchmark units instead of cash. Answers "does
     layering this signal on top of just holding the fund beat holding the
@@ -197,12 +234,17 @@ def backtest_core_satellite(strategy: str, holding_days: int, satellite_pct: flo
     from tracker.backtest.core_satellite import simulate_core_satellite
 
     if strategy.startswith("trump"):
-        trades, prices = _trump_event_pipeline(holding_days)
+        hd = holding_days or 10
+        trades, prices = _trump_event_pipeline(hd)
         if strategy == "trump-escalation-only":
             trades = trades[trades["category"] == "middle_east_conflict"]
+    elif strategy == "pre-fomc-drift":
+        hd = holding_days or 1
+        trades, prices = _macro_pipeline(hd)
     else:
+        hd = holding_days or 10
         include_deescalation = strategy == "generalized-with-deescalation"
-        trades, prices = _generalized_conflict_pipeline(holding_days, include_deescalation)
+        trades, prices = _generalized_conflict_pipeline(hd, include_deescalation)
 
     if trades.empty:
         click.echo("No resolvable trades for this strategy.")

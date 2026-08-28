@@ -336,6 +336,43 @@ weeks, making "the surprise date" genuinely ambiguous, unlike a military
 strike). Worth a dedicated pass later rather than a guessed date in a
 financial model.
 
+### Higher frequency, non-crisis: the pre-FOMC drift (a real negative result)
+
+11-12 conflict-escalation dates over ~2 years is nowhere near daily, and
+crises are inherently rare — you can't manufacture more of them. The
+honest way to get real frequency without waiting for a war is a
+**scheduled, recurring, publicly pre-announced calendar**: the Fed
+publishes its 8-meetings-a-year FOMC schedule years in advance
+(`tracker/data/macro_calendar.py`), guaranteeing this specific event keeps
+happening for the next 24 months regardless of politics.
+
+The hypothesis tested is a real, published academic finding — not folk
+wisdom: **pre-FOMC announcement drift** (Lucca & Moench, *Journal of
+Finance*, 2015), which found abnormally elevated average US equity returns
+in the ~24 hours before scheduled Fed decisions, independent of what the
+Fed actually announces. `backtest-macro` tests it directly: long SPY from
+the close before each of the last 21 resolvable FOMC meetings through the
+close on the decision day.
+
+**It didn't hold up.** 47.6% win rate — worse than a coin flip — and
+essentially flat total return (-0.02%) before costs eat the rest. Through
+core + satellite it comes out just below simply holding the fund (£6,877
+vs. £6,900 on £5,000). This is a real, useful negative result, not a
+failure to find something: it's a well-known, heavily published pattern,
+and well-known patterns are exactly the ones professional funds arbitrage
+away fastest once they're public — this project isn't the first to try
+trading it. Higher frequency didn't mean easier money here; if anything,
+scheduled and well-studied made it *harder* to find an edge than the
+rare, harder-to-systematically-trade crisis events did. Worth knowing
+before assuming "more frequent = better."
+
+CPI and non-farm payrolls releases are the same style of scheduled,
+recurring, publicly pre-announced event and would be worth the same test
+— not yet added, since getting their exact historical release dates right
+needs a dedicated sourcing pass the FOMC calendar didn't (the Fed
+publishes multi-year meeting dates directly; BLS release calendars are
+less trivial to source with full confidence for 2+ years of history).
+
 ## Usage
 
 ```bash
@@ -367,6 +404,11 @@ python -m tracker.cli backtest-core-satellite --strategy trump-escalation-only
 # The generalized version — Iran + Russia-Ukraine + China-Taiwan escalations
 # combined — see "Generalizing the escalation pattern" above.
 python -m tracker.cli backtest-core-satellite --strategy generalized-escalation-only
+
+# Scheduled, recurring, non-crisis alternative: the pre-FOMC drift (a real
+# negative result — see "Higher frequency, non-crisis" above).
+python -m tracker.cli backtest-macro
+python -m tracker.cli backtest-core-satellite --strategy pre-fomc-drift
 
 # THE HONEST 12-MONTH TEST: walk the model forward month by month, training
 # only on data before each test block, and compare the model-filtered
@@ -444,6 +486,7 @@ tracker/
     trump_events.py            hand-verified Trump policy/geopolitical calendar
     geopolitical_events.py       hand-verified Russia-Ukraine/China-Taiwan calendar
     combined_conflict.py           merges the above into one escalation signal
+    macro_calendar.py                FOMC meeting calendar + pre-drift hypothesis
   signals/
     mirror_trade.py        disclosures (Congress + insider) -> signal rows
     event_driven.py        daily news events -> signal rows via event_map
