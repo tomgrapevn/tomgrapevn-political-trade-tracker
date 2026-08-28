@@ -8,7 +8,7 @@ def test_geopolitical_calendar_entries_are_well_formed():
         assert event.direction in {"long", "short"}
         assert len(event.tickers) > 0
         assert event.source
-        assert event.category in {"conflict_escalation", "conflict_deescalation"}
+        assert event.category in {"conflict_escalation", "conflict_deescalation", "resource_supply_risk"}
 
 
 def test_geopolitical_to_signals_frame_shape():

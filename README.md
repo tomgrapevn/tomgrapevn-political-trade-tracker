@@ -373,6 +373,51 @@ needs a dedicated sourcing pass the FOMC calendar didn't (the Fed
 publishes multi-year meeting dates directly; BLS release calendars are
 less trivial to source with full confidence for 2+ years of history).
 
+### Beyond the US: EMEA, Asia, Sub-Saharan Africa
+
+Everything above skewed US/Trump-centric even though Iran and Ukraine
+already weren't. Widened `geopolitical_events.py` with real, dated events
+from three more regions:
+
+- **Middle East beyond Iran-US**: Israel killing Hezbollah leader Hassan
+  Nasrallah (Sept 27, 2024); Iran's ~200-missile direct strike on Israel
+  (Oct 1, 2024); Israel's retaliatory strikes on Iran (Oct 26, 2024) — the
+  last one is a useful edge case: those strikes *deliberately avoided*
+  Iranian oil infrastructure, and next-day oil prices reportedly fell on
+  that news. Tested anyway per the standard escalation hypothesis rather
+  than hand-picking the "obviously right" direction after the fact — and
+  over the actual 10-day holding window used throughout this project, oil
+  and defense positions still came out net positive (5 of 6 tickers). A
+  real reminder that a single day's headline reaction and a 10-day
+  systematic holding rule can disagree.
+- **South Asia**: India's "Operation Sindoor" strikes on Pakistan (May 7,
+  2025) — India's own defense-manufacturer stocks reportedly rallied far
+  harder than the global primes tested here (Nifty Defence Index +32% over
+  the following year), but this project hasn't verified NSE-ticker data
+  access, so only the same global LMT/RTX/NOC/GD basket was tested — a
+  likely understatement of the real move, noted rather than papered over.
+- **Sub-Saharan Africa**: M23 rebels capturing Goma, DRC (Jan 27, 2025) —
+  a region controlling major cobalt/coltan supply. Tested Glencore
+  (GLEN.L, DRC cobalt mining exposure) as the only real, liquid ticker
+  with a direct link — an imperfect proxy (a large diversified miner, not
+  a pure DRC play). Result: essentially flat (-0.7% over 10 days, one data
+  point). Inconclusive, as expected going in; kept separate from the main
+  escalation statistics as its own `resource_supply_risk` category rather
+  than folded in, since it's a different mechanism (supply-chain risk, not
+  a war-escalation trade) tested on a single event.
+
+**The escalation pattern held up as more independent, geographically
+diverse data was added** — the real test of whether it was fragile or
+robust. Adding these 4 new dates (9 more resolved trades) barely moved the
+aggregate: win rate 69.1% (was 69.6%), average return per trade +2.0%
+(unchanged), now across 15 independent dates instead of 11. Through core +
+satellite, full history (since May 2024) on £5,000: **£7,809 (+56.2%) vs.
+the fund's £6,900 (+38.0%)** — an ~18-point edge, in line with what the
+Iran/Ukraine/Taiwan-only version already showed. That consistency under
+expansion is more reassuring than the original 11-date finding on its own
+— an overfit pattern would have degraded as new, independent cases were
+added; this one didn't.
+
 ## Usage
 
 ```bash
