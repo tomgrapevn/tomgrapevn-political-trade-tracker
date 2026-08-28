@@ -432,6 +432,39 @@ def paper_trade(strategy: str, holding_days: int, confirm: bool):
         click.echo(r)
 
 
+@cli.command("monitor-news")
+@click.option("--json-output", is_flag=True, help="Also print a machine-readable JSON summary (for a scheduler to parse).")
+def monitor_news_cmd(json_output: bool):
+    """Check the free RSS feeds (tracker/data/rss_monitor.py) against the
+    documented rule set (tracker/data/live_rules.py) once, and print
+    anything worth reporting. This command does not send email itself —
+    see README "Live monitoring": a scheduled Claude Code session runs
+    this, reads the output, and sends via the Gmail connector so the
+    connector's own auth is used rather than storing credentials here."""
+    import json as json_module
+
+    from tracker.pipeline.monitor import format_email_body, run_monitor_check
+
+    result = run_monitor_check()
+    click.echo(f"Checked at {result.checked_at.isoformat()}: {result.n_articles_fetched} fetched, {result.n_articles_new} new")
+
+    if not result.has_anything_to_report():
+        click.echo("Nothing to report.")
+    else:
+        click.echo(format_email_body(result))
+
+    if json_output:
+        payload = {
+            "checked_at": result.checked_at.isoformat(),
+            "has_anything_to_report": result.has_anything_to_report(),
+            "n_validated_alerts": len([a for a in result.new_alerts if a.rule.validated]),
+            "n_informational_alerts": len([a for a in result.new_alerts if not a.rule.validated]),
+            "n_exit_reminders": len(result.exit_reminders),
+        }
+        click.echo("\n---JSON---")
+        click.echo(json_module.dumps(payload))
+
+
 @cli.command("daily-run")
 @click.option("--window-hours", default=24, show_default=True, help="How far back to look for news/disclosures.")
 @click.option("--min-article-count", default=3, show_default=True)

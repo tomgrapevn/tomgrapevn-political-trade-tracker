@@ -53,6 +53,55 @@ hand-authored keyword → affected-tickers hypothesis table in
 airlines). This table is a starting hypothesis, not a fact — the backtest
 is what tells you whether a given entry actually held up.
 
+## Live monitoring (email alerts, not automated trading)
+
+`tracker/data/rss_monitor.py` + `tracker/data/live_rules.py` +
+`tracker/pipeline/monitor.py` (`python -m tracker.cli monitor-news`) is a
+live version of the event detection this project has been doing by hand
+throughout — with two honest limits stated up front:
+
+1. **Detection is a keyword match against RSS headlines, not verified
+   research.** Every event in the hand-built calendars
+   (`trump_events.py`, `geopolitical_events.py`) was found by manually
+   reading multiple sources and cross-checking dates — that's what made
+   those backtest results trustworthy. This module does none of that. It
+   *will* produce false positives and *will* miss things a human would
+   catch. Treat a match as "worth a look," not a confirmed event.
+2. **It reports the documented rule's output — it does not decide for
+   you and it does not place any trade.** For each match it prints the
+   backtested category, the mechanical trade the rule specifies (which
+   tickers, which direction, how long to hold), and the historical win
+   rate/average return for that exact category — the same facts in this
+   README, just delivered automatically. Categories this project actually
+   tested and found *don't* work (de-escalation, tariffs, FOMC, crypto
+   policy) are reported as detected-but-not-validated, not suppressed and
+   not upgraded into a suggested trade.
+
+**Data source**: four free, no-key, no-signup RSS feeds — verified live
+while building this, not assumed: BBC World News, Al Jazeera, UN News, and
+the US Department of War's (formerly Defense) own newsroom feed. No paid
+news API needed; GDELT (this project's original live-news pick) still has
+a broken TLS certificate on the provider's end as of writing.
+
+**State**: `data/cache/rss_monitor_state.json` tracks which article links
+have already been processed (so the same headline doesn't refire the same
+alert) and which validated signals are still "open" (so it can later
+remind you the documented holding period has elapsed and it's worth
+considering closing the position) — this is a reminder based on the
+rule's holding period, not knowledge of whether you actually placed the
+trade.
+
+**Delivery**: `monitor-news` doesn't send email itself — it prints
+everything a scheduler needs. Email is sent by whatever Claude Code
+session runs the check, via your Gmail connector (enable it for that
+chat/session under claude.ai Settings → Connectors), so your own Gmail
+auth is used rather than credentials stored in this repo. A scheduled
+Claude Code trigger firing every few hours, with a prompt telling it to
+run `python -m tracker.cli monitor-news` and email the result if there's
+anything to report, is the intended way to run this continuously — hourly
+is possible but adds cost without adding much value, since these are rare
+events that stay in the news for hours once they break.
+
 ## Daily automation (24h news window, fixed time)
 
 `python -m tracker.cli daily-run` is the "trade at the same time every day"
@@ -474,6 +523,10 @@ python -m tracker.cli train-events --model-type logreg
 python -m tracker.cli daily-run
 python -m tracker.cli daily-run --confirm
 
+# Live RSS monitor — one check, prints alerts/exit reminders (see "Live
+# monitoring" above for how this gets scheduled + emailed).
+python -m tracker.cli monitor-news
+
 # Size the latest signals against your Alpaca *paper* account and print
 # what would be submitted (dry run by default; --confirm actually submits
 # to the paper endpoint — never a live one, see below).
@@ -532,6 +585,8 @@ tracker/
     geopolitical_events.py       hand-verified Russia-Ukraine/China-Taiwan calendar
     combined_conflict.py           merges the above into one escalation signal
     macro_calendar.py                FOMC meeting calendar + pre-drift hypothesis
+    rss_monitor.py                    live RSS fetch/parse (BBC/Al Jazeera/UN/DoW)
+    live_rules.py                      keyword match -> documented rule mapping
   signals/
     mirror_trade.py        disclosures (Congress + insider) -> signal rows
     event_driven.py        daily news events -> signal rows via event_map
@@ -547,6 +602,7 @@ tracker/
     paper_broker.py          Alpaca paper-trading client (paper-only, guarded)
   pipeline/
     daily.py                24h-window signal generation + paper execution
+    monitor.py                live RSS check -> alerts + exit reminders
   reporting.py              Markdown report rendering
 tests/                     Synthetic-fixture tests (see "Setup" above)
 ```
